@@ -19,11 +19,9 @@ def format_sms(sms_data, order_number):
     formatted_sms = f"{order_number}. Phone number: {number}\tMessage: {message}"
     return formatted_sms
 
-def clear_inbox():
-    # Destroy all widgets inside the inbox_frame_container
-    for widget in inbox_frame_container.winfo_children():
+def clear_frame(frame_container):
+    for widget in frame_container.winfo_children():
         widget.destroy()
-    # Reset the row counter to 0
     global inbox_row
     inbox_row = 0
 
@@ -45,21 +43,18 @@ def save_config(ip, password):
 
 def fetch_router_model(ip):
     try:
-        # Try HTTPS first
         url = f"https://{ip}/js/config/config.js"
         response = requests.get(url, verify=False)
         if response.status_code == 200:
             match = re.search(r'DEVICE_MODEL:"([^"]+)"', response.text)
             if match:
                 model_name = match.group(1)
-                # Fetching wa_inner_version
                 wa_inner_version_url = f"https://{ip}/goform/goform_get_cmd_process?isTest=false&cmd=Language%2Ccr_version%2Cwa_inner_version%2Cmodem_main_state&multi_data=1&_=1716895312378"
                 wa_inner_version_response = requests.get(wa_inner_version_url, verify=False)
                 if wa_inner_version_response.status_code == 200:
                     wa_inner_version_data = wa_inner_version_response.json()
                     wa_inner_version = wa_inner_version_data.get('wa_inner_version', 'Unknown')
                     return f"{model_name} ( Version: {wa_inner_version})"
-        # If HTTPS fails, try HTTP
     except SSLError:
         try:
             url = f"http://{ip}/js/config/config.js"
@@ -68,7 +63,6 @@ def fetch_router_model(ip):
                 match = re.search(r'DEVICE_MODEL:"([^"]+)"', response.text)
                 if match:
                     model_name = match.group(1)
-                    # Fetching wa_inner_version
                     wa_inner_version_url = f"http://{ip}/goform/goform_get_cmd_process?isTest=false&cmd=Language%2Ccr_version%2Cwa_inner_version%2Cmodem_main_state&multi_data=1&_=1716895312378"
                     wa_inner_version_response = requests.get(wa_inner_version_url)
                     if wa_inner_version_response.status_code == 200:
@@ -98,19 +92,22 @@ def execute_command(ip_entry, password_entry, ha_select, phone_number_entry=None
     
     clear_consoles()
     
-    # Instantiate zteRouter with IP address and password
     zte_instance = zteRouter(ip, password)
     
     if ha_select == 1:
-        clear_inbox()
+        clear_frame(inbox_frame_container)
+        clear_frame(outbox_frame_container)
         try:
             result = zte_instance.parsesms()
             sms_data = json.loads(result)
-            for i, message in enumerate(sms_data["messages"], 1):  # Start counting from 1
+            for i, message in enumerate(sms_data["messages"], 1):
                 formatted_sms = format_sms(message, i)
-                add_sms_to_inbox(formatted_sms)  # Add formatted SMS to the inbox
+                if message['tag'] == '1':
+                    add_sms_to_frame(inbox_frame_container, formatted_sms)
+                elif message['tag'] == '2':
+                    add_sms_to_frame(outbox_frame_container, formatted_sms)
         except Exception as e:
-            add_sms_to_inbox(f"Error: {str(e)}\n")
+            add_sms_to_frame(inbox_frame_container, f"Error: {str(e)}\n")
     elif ha_select == 2:
         phone_number = phone_number_entry.get()
         message = message_entry.get()
@@ -228,8 +225,6 @@ def update_signal_bar(signal_value):
         color = colors[i] if i < signal_value else "#dddddd"
         signal_canvas.itemconfig(signal_bars[i], fill=color, outline="black")
 
-
-
 def clear_consoles():
     console.delete(1.0, tk.END)
     formatted_console.delete(1.0, tk.END)
@@ -239,45 +234,45 @@ def on_closing():
     save_config(ip_entry.get(), password_entry.get())
     root.destroy()
 
-def add_sms_to_inbox(message):
+def add_sms_to_frame(frame_container, message):
     global inbox_row
-    inbox_label = ttk.Label(inbox_frame_container, text=message, wraplength=600, anchor="w")
-    inbox_label.grid(row=inbox_row, column=0, sticky="ew", padx=5, pady=2)
+    sms_label = ttk.Label(frame_container, text=message, wraplength=600, anchor="w")
+    sms_label.grid(row=inbox_row, column=0, sticky="ew", padx=5, pady=2)
     inbox_row += 1
 
 # Load configuration
 config = load_config()
 
 # Set up the GUI
-root = ttk.Window(themename="cosmo")  # Using ttkbootstrap window and theme
+root = ttk.Window(themename="cosmo")
 root.title("ZTE Administration Utility")
-root.geometry("900x800")  # Expanded window size
+root.geometry("900x800")
 
-# Router Model Label (on top)
+# Router Model Label
 router_model_label = ttk.Label(root, text="Router Model: Unknown", font=('TkDefaultFont', 12, 'bold'))
 router_model_label.grid(row=0, column=0, columnspan=2, padx=(10, 5), pady=(10, 5))
 
-# IP Address Label and Entry (above tabs)
+# IP Address Entry
 ip_label = ttk.Label(root, text="Router IP:")
 ip_label.grid(row=1, column=0, sticky="e", padx=(10, 5), pady=(10, 5))
 
 ip_entry = ttk.Entry(root)
 ip_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=(10, 5))
-ip_entry.insert(0, config['RouterIP'])  # Load saved IP address
+ip_entry.insert(0, config['RouterIP'])
 
-# Password Label and Entry (above tabs)
+# Password Entry
 password_label = ttk.Label(root, text="Router Password:")
 password_label.grid(row=2, column=0, sticky="e", padx=(10, 5), pady=5)
 
 password_entry = ttk.Entry(root, show="*")
 password_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=5)
-password_entry.insert(0, config['RouterPassword'])  # Load saved password
+password_entry.insert(0, config['RouterPassword'])
 
 # Connect Button
 connect_button = ttk.Button(root, text="Connect", command=lambda: execute_command(ip_entry, password_entry, 3))
 connect_button.grid(row=2, column=2, padx=(0, 0), pady=0)
 
-# Signal Bar Canvas with Signal Text
+# Signal Bar
 signal_label = ttk.Label(root, text="Signal:", font=('TkDefaultFont', 10))
 signal_label.place(x=770, y=10)
 
@@ -292,8 +287,7 @@ for i in range(5):
     )
     signal_bars.append(bar)
 
-
-# Create the Notebook (tab container)
+# Create the Notebook
 notebook = ttk.Notebook(root)
 notebook.grid(row=3, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
 
@@ -309,7 +303,11 @@ notebook.add(sms_frame, text="Send SMS")
 inbox_frame = ttk.Frame(notebook)
 notebook.add(inbox_frame, text="SMS Inbox")
 
-# Create buttons for each command (on main tab)
+# SMS Outbox tab
+outbox_frame = ttk.Frame(notebook)
+notebook.add(outbox_frame, text="SMS Outbox")
+
+# Create buttons for each command (Main tab)
 commands = [
     ("Parse SMS", 1),
     ("Get ZTE Info", 3),
@@ -324,15 +322,14 @@ for i, (text, value) in enumerate(commands):
     button.grid(row=i, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
     main_frame.grid_columnconfigure(0, weight=1, uniform="buttons")
 
-# Create a console area to display output (on main tab)
+# Console areas (Main tab)
 console = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("TkDefaultFont", 10))
 console.grid(row=len(commands), column=0, columnspan=2, padx=10, pady=10)
 
-# Create another console for formatted SMS details (on main tab)
 formatted_console = scrolledtext.ScrolledText(main_frame, width=60, height=5, font=("TkDefaultFont", 10))
 formatted_console.grid(row=len(commands)+1, column=0, columnspan=2, padx=10, pady=10)
 
-# Create a scrollable frame to display parsed information
+# Info frame (Right side)
 info_frame = ttk.Frame(root)
 info_frame.grid(row=3, column=3, rowspan=7, padx=10, pady=10, sticky="nsew")
 
@@ -341,73 +338,75 @@ info_scrollbar = ttk.Scrollbar(info_frame, orient="vertical", command=info_canva
 info_canvas.configure(yscrollcommand=info_scrollbar.set)
 
 info_frame_container = ttk.Frame(info_canvas)
-
 info_scrollbar.pack(side="right", fill="y")
 info_canvas.pack(side="left", fill="both", expand=True)
 info_canvas.create_window((0, 0), window=info_frame_container, anchor="nw")
-
 info_frame_container.bind("<Configure>", lambda e: info_canvas.configure(scrollregion=info_canvas.bbox("all")))
-
 labels = []
 
-# Create a console area to display SMS sending output (on SMS tab)
+# SMS Console (SMS tab)
 sms_console = scrolledtext.ScrolledText(sms_frame, width=60, height=10, font=("TkDefaultFont", 10))
 sms_console.grid(row=3, column=0, columnspan=2, padx=10, pady=10)
 
-# Phone Number Label and Entry (on SMS tab)
+# Phone Number Entry (SMS tab)
 phone_number_label = ttk.Label(sms_frame, text="Phone Number:")
 phone_number_label.grid(row=0, column=0, sticky="e", padx=(10, 5), pady=(10, 5))
 
 phone_number_entry = ttk.Entry(sms_frame)
 phone_number_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 5))
 
-# Message Label and Entry (on SMS tab)
+# Message Entry (SMS tab)
 message_label = ttk.Label(sms_frame, text="Message:")
 message_label.grid(row=1, column=0, sticky="e", padx=(10, 5), pady=5)
 
 message_entry = ttk.Entry(sms_frame)
 message_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=5)
 
-# Send SMS Button (on SMS tab)
 send_sms_button = ttk.Button(sms_frame, text="Send SMS", command=lambda: execute_command(ip_entry, password_entry, 2, phone_number_entry, message_entry))
 send_sms_button.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
 
-# Modify the Parse SMS button command to pass the appropriate ha_select value
+# Parse SMS Button (SMS Inbox tab)
 parse_sms_button = ttk.Button(inbox_frame, text="Parse SMS", command=lambda: execute_command(ip_entry, password_entry, 1))
 parse_sms_button.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
 
-# Create a canvas to contain the SMS messages (on SMS Inbox tab)
+# Parse SMS Button (SMS Outbox tab)
+parse_sms_outbox_button = ttk.Button(outbox_frame, text="Parse SMS", command=lambda: execute_command(ip_entry, password_entry, 1))
+parse_sms_outbox_button.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+
+# SMS Inbox Frame (SMS Inbox tab)
 inbox_canvas = tk.Canvas(inbox_frame)
 inbox_canvas.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-# Create a frame to hold the SMS messages inside the canvas
 inbox_frame_container = ttk.Frame(inbox_canvas)
 inbox_frame_container.grid(row=0, column=0, sticky="nsew")
 
-# Add a scrollbar for the canvas
-scrollbar = ttk.Scrollbar(inbox_frame, orient="vertical", command=inbox_canvas.yview)
-scrollbar.grid(row=0, column=1, sticky="ns")
-inbox_canvas.configure(yscrollcommand=scrollbar.set)
+scrollbar_inbox = ttk.Scrollbar(inbox_frame, orient="vertical", command=inbox_canvas.yview)
+scrollbar_inbox.grid(row=0, column=1, sticky="ns")
+inbox_canvas.configure(yscrollcommand=scrollbar_inbox.set)
 
-# Configure the canvas to expand with the window
 inbox_frame.grid_rowconfigure(0, weight=1)
 inbox_frame.grid_columnconfigure(0, weight=1)
-
-# Bind the canvas to the scrollbar
 inbox_canvas.create_window((0, 0), window=inbox_frame_container, anchor="nw")
+inbox_frame_container.bind("<Configure>", lambda e: inbox_canvas.configure(scrollregion=inbox_canvas.bbox("all")))
 
-# Function to update the scroll region when the frame size changes
-def inbox_configure_scroll_region(event):
-    inbox_canvas.configure(scrollregion=inbox_canvas.bbox("all"))
+# SMS Outbox Frame (SMS Outbox tab)
+outbox_canvas = tk.Canvas(outbox_frame)
+outbox_canvas.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-inbox_frame_container.bind("<Configure>", inbox_configure_scroll_region)
+outbox_frame_container = ttk.Frame(outbox_canvas)
+outbox_frame_container.grid(row=0, column=0, sticky="nsew")
+
+scrollbar_outbox = ttk.Scrollbar(outbox_frame, orient="vertical", command=outbox_canvas.yview)
+scrollbar_outbox.grid(row=0, column=1, sticky="ns")
+outbox_canvas.configure(yscrollcommand=scrollbar_outbox.set)
+
+outbox_frame.grid_rowconfigure(0, weight=1)
+outbox_frame.grid_columnconfigure(0, weight=1)
+outbox_canvas.create_window((0, 0), window=outbox_frame_container, anchor="nw")
+outbox_frame_container.bind("<Configure>", lambda e: outbox_canvas.configure(scrollregion=outbox_canvas.bbox("all")))
 
 inbox_row = 0  # Track the current row in the inbox grid
 
-# Update router model label based on the loaded IP address
 update_router_model_label(ip_entry.get())
-
-# Bind the on_closing function to the window close event
 root.protocol("WM_DELETE_WINDOW", on_closing)
-
 root.mainloop()
