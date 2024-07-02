@@ -2,7 +2,16 @@
 
 **Program**
 
+Supported models : 
+
+```
+MC801A
+MC889
+MC888
+```
+
 **Compiled version is in releases !**
+
 
 ![enter image description here](https://raw.githubusercontent.com/Kajkac/ZTE-MC-WINGUI/main/img/1.png)
 
