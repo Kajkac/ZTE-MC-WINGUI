@@ -10,6 +10,7 @@ import requests
 import re
 from requests.exceptions import SSLError
 from mc import zteRouter
+import webbrowser
 
 CONFIG_FILE = "config.ini"
 
@@ -110,7 +111,7 @@ def execute_command(ip_entry, password_entry, ha_select, phone_number_entry=None
             add_sms_to_frame(inbox_frame_container, f"Error: {str(e)}\n")
     elif ha_select == 2:
         phone_number = phone_number_entry.get()
-        message = message_entry.get()
+        message = message_entry.get("1.0", tk.END).strip()
         if not phone_number or not message:
             sms_console.insert(tk.END, "Phone number or message not supplied\n")
             return
@@ -122,17 +123,18 @@ def execute_command(ip_entry, password_entry, ha_select, phone_number_entry=None
         console.insert(tk.END, f"{result}\n")
         display_info(result)
         update_signal_bar(json.loads(result).get('signalbar', ''))
+        populate_router_info(result)
     elif ha_select == 4:
         zte_instance.ztereboot()
-        console.insert(tk.END, "Rebooted.\n")
+        actions_console.insert(tk.END, "Rebooted.\n")
     elif ha_select == 5:
         result = zte_instance.parsesms()
         data = json.loads(result)
         ids = [message['id'] for message in data['messages']]
         formatted_ids = ";".join(ids)
-        console.insert(tk.END, f"Formatted IDs: {formatted_ids}\n")
+        actions_console.insert(tk.END, f"Formatted IDs: {formatted_ids}\n")
         zte_instance.deletesms(formatted_ids)
-        console.insert(tk.END, "Deleted SMS.\n")
+        actions_console.insert(tk.END, "Deleted SMS.\n")
     elif ha_select == 6:
         time.sleep(6)
         json_string = zte_instance.ztesmsinfo()
@@ -151,6 +153,46 @@ def execute_command(ip_entry, password_entry, ha_select, phone_number_entry=None
         update_signal_bar(json.loads(result).get('signalbar', ''))
     else:
         console.insert(tk.END, "ELSE\n")
+
+def populate_router_info(result):
+    data = json.loads(result)
+    rmcc = data.get("rmcc", "")
+    rmnc = data.get("rmnc", "")
+    cell_id = data.get("cell_id", "")
+    wan_ip = data.get("wan_ipaddr", "")
+    main_band = data.get("lte_ca_pcell_band", "")
+    main_bandwidth = data.get("lte_ca_pcell_bandwidth", "")
+    ca_bands = data.get("lte_multi_ca_scell_info", "")
+    ca_bands_formatted = format_ca_bands(ca_bands, data.get("nr5g_action_band", ""))
+
+    # Calculate enbid
+    cell_id_int = int(cell_id, 16)
+    enb_id = cell_id_int // 256
+
+    enbid_url = f"https://www.cellmapper.net/enbid?net=LTE&cellid={rmcc}{rmnc}.{enb_id}"
+
+    router_info_text = f"""
+    Information : 
+
+    WAN IP: {wan_ip}
+
+    ENB ID: {enb_id} (click)
+    
+    CELL ID: {cell_id}
+
+    MAIN: B{main_band} (@{main_bandwidth}) CA: {ca_bands_formatted}
+    """
+    router_info_label.config(text=router_info_text, justify="left")
+    router_info_label.bind("<Button-1>", lambda e: webbrowser.open_new(enbid_url))
+
+def format_ca_bands(ca_bands, nr_band):
+    if ca_bands:
+        ca_v = ca_bands.strip(';').split(';')
+        ca_txt = "+".join([f"B{d.split(',')[3]}(@{d.split(',')[5]}Mhz)" for d in ca_v])
+        if nr_band:
+            ca_txt += f"+{nr_band}"
+        return ca_txt
+    return nr_band
 
 def display_info(result):
     data = json.loads(result)
@@ -211,9 +253,9 @@ def display_info(result):
 
     for i, (label_text, value) in enumerate(info_labels):
         if i < len(labels):
-            labels[i].config(text=f"{label_text} {value}")
+            labels[i].config(text=f"{label_text} {value}", font=('TkDefaultFont', 10, 'bold'))
         else:
-            new_label = ttk.Label(info_frame_container, text=f"{label_text} {value}", anchor="w")
+            new_label = ttk.Label(info_frame_container, text=f"{label_text} {value}", anchor="w", font=('TkDefaultFont', 10, 'bold'))
             new_label.grid(row=i, column=0, sticky="w", padx=10, pady=5)
             labels.append(new_label)
 
@@ -227,7 +269,7 @@ def update_signal_bar(signal_value):
 
 def clear_consoles():
     console.delete(1.0, tk.END)
-    formatted_console.delete(1.0, tk.END)
+    actions_console.delete(1.0, tk.END)
     sms_console.delete(1.0, tk.END)
 
 def on_closing():
@@ -246,7 +288,7 @@ config = load_config()
 # Set up the GUI
 root = ttk.Window(themename="cosmo")
 root.title("ZTE Administration Utility")
-root.geometry("900x800")
+root.geometry("950x700")
 
 # Router Model Label
 router_model_label = ttk.Label(root, text="Router Model: Unknown", font=('TkDefaultFont', 12, 'bold'))
@@ -289,11 +331,19 @@ for i in range(5):
 
 # Create the Notebook
 notebook = ttk.Notebook(root)
-notebook.grid(row=3, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+notebook.grid(row=3, column=0, columnspan=3, rowspan=7, padx=10, pady=10, sticky="nsew")
 
-# Main tab
-main_frame = ttk.Frame(notebook)
-notebook.add(main_frame, text="Main")
+# Router Info tab
+router_info_frame = ttk.Frame(notebook)
+notebook.add(router_info_frame, text="Router Info")
+
+# ZTE Info tab
+zte_info_frame = ttk.Frame(notebook)
+notebook.add(zte_info_frame, text="ZTE Info")
+
+# Actions tab
+actions_frame = ttk.Frame(notebook)
+notebook.add(actions_frame, text="Actions")
 
 # SMS tab
 sms_frame = ttk.Frame(notebook)
@@ -307,27 +357,36 @@ notebook.add(inbox_frame, text="SMS Inbox")
 outbox_frame = ttk.Frame(notebook)
 notebook.add(outbox_frame, text="SMS Outbox")
 
-# Create buttons for each command (Main tab)
+# Create buttons for each command (ZTE Info tab)
 commands = [
-    ("Parse SMS", 1),
     ("Get ZTE Info", 3),
-    ("Reboot ZTE", 4),
-    ("Delete SMS", 5),
     ("Get SMS Info", 6),
     ("Get ZTE Info 2", 7),
 ]
 
 for i, (text, value) in enumerate(commands):
-    button = ttk.Button(main_frame, text=text, command=lambda v=value: execute_command(ip_entry, password_entry, v))
+    button = ttk.Button(zte_info_frame, text=text, command=lambda v=value: execute_command(ip_entry, password_entry, v))
     button.grid(row=i, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-    main_frame.grid_columnconfigure(0, weight=1, uniform="buttons")
+    zte_info_frame.grid_columnconfigure(0, weight=1, uniform="buttons")
 
-# Console areas (Main tab)
-console = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("TkDefaultFont", 10))
+# Console areas (ZTE Info tab)
+console = scrolledtext.ScrolledText(zte_info_frame, width=60, height=10, font=("TkDefaultFont", 10))
 console.grid(row=len(commands), column=0, columnspan=2, padx=10, pady=10)
 
-formatted_console = scrolledtext.ScrolledText(main_frame, width=60, height=5, font=("TkDefaultFont", 10))
-formatted_console.grid(row=len(commands)+1, column=0, columnspan=2, padx=10, pady=10)
+# Reboot and Delete SMS buttons (Actions tab)
+actions_commands = [
+    ("Reboot ZTE", 4),
+    ("Delete SMS", 5),
+]
+
+for i, (text, value) in enumerate(actions_commands):
+    button = ttk.Button(actions_frame, text=text, command=lambda v=value: execute_command(ip_entry, password_entry, v))
+    button.grid(row=i, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+    actions_frame.grid_columnconfigure(0, weight=1, uniform="buttons")
+
+# Console areas (Actions tab)
+actions_console = scrolledtext.ScrolledText(actions_frame, width=60, height=10, font=("TkDefaultFont", 10))
+actions_console.grid(row=len(actions_commands), column=0, columnspan=2, padx=10, pady=10)
 
 # Info frame (Right side)
 info_frame = ttk.Frame(root)
@@ -344,26 +403,32 @@ info_canvas.create_window((0, 0), window=info_frame_container, anchor="nw")
 info_frame_container.bind("<Configure>", lambda e: info_canvas.configure(scrollregion=info_canvas.bbox("all")))
 labels = []
 
+# Router Info display (Router Info tab)
+router_info_label = ttk.Label(router_info_frame, text="", anchor="w", justify="left", font=('TkDefaultFont', 10, 'bold'))
+router_info_label.pack(padx=10, pady=10, fill="both", expand=True)
+
 # SMS Console (SMS tab)
+sms_console_label = ttk.Label(sms_frame, text="Console:")
+sms_console_label.grid(row=4, column=0, sticky="w", padx=10, pady=(0, 5))
 sms_console = scrolledtext.ScrolledText(sms_frame, width=60, height=10, font=("TkDefaultFont", 10))
-sms_console.grid(row=3, column=0, columnspan=2, padx=10, pady=10)
+sms_console.grid(row=5, column=0, columnspan=2, padx=10, pady=(0, 10))
 
 # Phone Number Entry (SMS tab)
 phone_number_label = ttk.Label(sms_frame, text="Phone Number:")
 phone_number_label.grid(row=0, column=0, sticky="e", padx=(10, 5), pady=(10, 5))
 
-phone_number_entry = ttk.Entry(sms_frame)
+phone_number_entry = ttk.Entry(sms_frame, width=50)
 phone_number_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 5))
 
 # Message Entry (SMS tab)
 message_label = ttk.Label(sms_frame, text="Message:")
 message_label.grid(row=1, column=0, sticky="e", padx=(10, 5), pady=5)
 
-message_entry = ttk.Entry(sms_frame)
+message_entry = tk.Text(sms_frame, height=5, width=50, wrap="word")
 message_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=5)
 
 send_sms_button = ttk.Button(sms_frame, text="Send SMS", command=lambda: execute_command(ip_entry, password_entry, 2, phone_number_entry, message_entry))
-send_sms_button.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+send_sms_button.grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=5)
 
 # Parse SMS Button (SMS Inbox tab)
 parse_sms_button = ttk.Button(inbox_frame, text="Parse SMS", command=lambda: execute_command(ip_entry, password_entry, 1))
